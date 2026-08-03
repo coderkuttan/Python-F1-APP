@@ -19,6 +19,10 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+from auth import (
+    validate_registration, validate_login,
+    register_user, login_user, seed_demo_user,
+)
 
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG
@@ -43,8 +47,102 @@ h1, h2, h3 { color: #e8e8f0; }
 }
 .metric-box .val { font-size: 1.8rem; font-weight: 700; color: #ffffff; }
 .metric-box .lbl { font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+.auth-box {
+    max-width: 420px; margin: 3rem auto; background: #15151f;
+    border: 1px solid #24243a; border-radius: 14px; padding: 2rem;
+}
 </style>
 """, unsafe_allow_html=True)
+
+seed_demo_user()
+
+# ─────────────────────────────────────────────────────────────
+# SESSION STATE
+# ─────────────────────────────────────────────────────────────
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "current_user" not in st.session_state:
+    st.session_state.current_user = {}
+
+# ─────────────────────────────────────────────────────────────
+# LOGIN / REGISTER GATE
+# ─────────────────────────────────────────────────────────────
+if not st.session_state.logged_in:
+    st.markdown("""
+    <div style="text-align:center;margin-top:1rem">
+        <h1 style="color:#e8002d;margin-bottom:0;">🏁 F1 Race Analytics Explorer</h1>
+        <p style="color:#888;letter-spacing:1px;font-size:0.85rem;text-transform:uppercase;">
+            BCA306-5 Advanced Python · Lab P6
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    auth_choice = st.radio(
+        "Choose action", ["🔑 Login", "📝 Register"],
+        horizontal=True, label_visibility="collapsed"
+    )
+
+    if auth_choice == "🔑 Login":
+        st.markdown('<div class="auth-box">', unsafe_allow_html=True)
+        st.subheader("Welcome back")
+        with st.form("login_form"):
+            credential = st.text_input("Username or Email", placeholder="e.g. demo")
+            password   = st.text_input("Password", type="password")
+            submitted  = st.form_submit_button("Login", use_container_width=True)
+        if submitted:
+            result = validate_login(credential, password)
+            if not result["valid"]:
+                for field, msg in result["errors"].items():
+                    st.error(f"**{field.replace('_',' ').title()}:** {msg}")
+            else:
+                ok, msg, user_data = login_user(credential, password)
+                if ok:
+                    st.session_state.logged_in    = True
+                    st.session_state.current_user = user_data
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.info("💡 Demo credentials: **demo** / **Demo@1234**")
+
+    else:  # Register
+        st.markdown('<div class="auth-box">', unsafe_allow_html=True)
+        st.subheader("Create an account")
+        with st.form("register_form"):
+            full_name = st.text_input("Full Name", placeholder="e.g. Lewis Hamilton")
+            username  = st.text_input("Username", placeholder="3–20 chars, start with a letter")
+            email     = st.text_input("Email", placeholder="e.g. you@example.com")
+            password  = st.text_input("Password", type="password")
+            confirm   = st.text_input("Confirm Password", type="password")
+            submitted = st.form_submit_button("Create Account", use_container_width=True)
+        if submitted:
+            result = validate_registration(username, full_name, email, password, confirm)
+            if not result["valid"]:
+                for field, msg in result["errors"].items():
+                    st.error(f"**{field.replace('_',' ').title()}:** {msg}")
+            else:
+                ok, msg = register_user(username, full_name, email, password)
+                if ok:
+                    st.success(f"🎉 {msg} Switch to Login to continue.")
+                else:
+                    st.error(msg)
+        st.markdown("</div>", unsafe_allow_html=True)
+        with st.expander("📋 Password rules"):
+            st.markdown("""
+            - Minimum 8 characters
+            - At least one uppercase letter
+            - At least one digit
+            - At least one special character (`!@#$%^&*` etc.)
+            """)
+
+    st.stop()
+
+# ─────────────────────────────────────────────────────────────
+# LOGGED-IN HEADER
+# ─────────────────────────────────────────────────────────────
+_user = st.session_state.current_user
+
 
 TEAM_COLORS = {
     "Red Bull Racing": "#3671C6", "Scuderia Ferrari": "#E8002D",
@@ -65,6 +163,11 @@ def load_uploaded(file):
     return pd.read_csv(file)
 
 st.sidebar.title("🏎️ F1 Analytics")
+st.sidebar.markdown(f"**{_user.get('full_name','User')}**  \n<small>{_user.get('email','')}</small>", unsafe_allow_html=True)
+if st.sidebar.button("🚪 Logout", use_container_width=True):
+    st.session_state.logged_in = False
+    st.session_state.current_user = {}
+    st.rerun()
 st.sidebar.markdown("---")
 
 # Widget 1: File uploader
@@ -181,17 +284,22 @@ tab1, tab2, tab3, tab4 = st.tabs(
 with tab1:
     st.subheader("Lap Time Comparison")
 
-    plot_fn = {"Line": px.line, "Scatter": px.scatter, "Area": px.area}[chart_style]
-    fig = plot_fn(
-        filtered, x="lap", y="lap_time_sec", color="driver",
-        color_discrete_map={
-            d: TEAM_COLORS.get(filtered[filtered["driver"]==d]["team"].iloc[0], "#e8002d")
-            for d in selected_drivers
-        },
+    color_map = {
+        d: TEAM_COLORS.get(filtered[filtered["driver"]==d]["team"].iloc[0], "#e8002d")
+        for d in selected_drivers
+    }
+    chart_kwargs = dict(
+        data_frame=filtered, x="lap", y="lap_time_sec", color="driver",
+        color_discrete_map=color_map,
         labels={"lap": "Lap Number", "lap_time_sec": "Lap Time (s)", "driver": "Driver"},
         title=f"Lap Time Trace — {selected_race}",
-        markers=(chart_style != "Area"),
     )
+    if chart_style == "Line":
+        fig = px.line(markers=True, **chart_kwargs)
+    elif chart_style == "Scatter":
+        fig = px.scatter(**chart_kwargs)
+    else:  # Area
+        fig = px.area(**chart_kwargs)
     fig.update_layout(
         plot_bgcolor="#15151f", paper_bgcolor="#0e0e14",
         font_color="#e8e8f0", legend_title_text="Driver",
