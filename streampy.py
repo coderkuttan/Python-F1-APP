@@ -254,7 +254,7 @@ with tab2:
         summary.style.format({
             "best_lap": "{:.3f}", "avg_lap": "{:.3f}", "worst_lap": "{:.3f}",
             "avg_position": "{:.1f}", "top_speed": "{:.1f}",
-        }).background_gradient(subset=["best_lap"], cmap="RdYlGn_r"),
+        }),
         use_container_width=True,
     )
 
